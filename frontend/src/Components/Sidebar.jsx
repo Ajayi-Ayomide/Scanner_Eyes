@@ -76,10 +76,6 @@ export default function Sidebar() {
           <div className="bg-[#22334d] rounded-full p-2">
             <FaShieldAlt className="text-teal-400 text-xl" />
           </div>
-          <div>
-            <div className="font-semibold text-white text-sm">Admin User</div>
-            <div className="text-xs text-gray-400">admin@company.com</div>
-          </div>
         </div>
       </div>
     </aside>
