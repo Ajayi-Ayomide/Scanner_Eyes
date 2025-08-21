@@ -37,13 +37,12 @@ import { NavLink } from "react-router-dom";
 import { FaShieldAlt, FaSearch, FaBug, FaTools, FaCog, FaHistory, FaChartBar } from "react-icons/fa";
 
 const navItems = [
-  { to: "/", label: "Dashboard", icon: <FaShieldAlt /> },
+  { to: "/dashboard", label: "Dashboard", icon: <FaShieldAlt /> },
   { to: "/scan", label: "Network Scan", icon: <FaSearch /> },
   { to: "/vulnerabilities", label: "Vulnerabilities", icon: <FaBug /> },
   { to: "/fix-assistant", label: "Fix Assistant", icon: <FaTools /> },
   { to: "/analytics", label: "Analytics", icon: <FaChartBar /> },
-  { to: "/history", label: "History", icon: <FaHistory /> },
-  { to: "/settings", label: "Settings", icon: <FaCog /> },
+  { to: "/history", label: "History", icon: <FaHistory /> },    
 ];
 
 export default function Sidebar() {
