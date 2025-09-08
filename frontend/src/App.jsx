@@ -12,30 +12,67 @@ import { Route, Routes} from 'react-router-dom';
 import FixAssistant from './Components/FixAssistant';
 import Login from './Components/Login';
 import Signup from './Components/Signup';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 
-import { useLocation } from 'react-router-dom';
+import { useLocation, Navigate } from 'react-router-dom';
 
-function App() {
-  const location = useLocation();
-  const isAuthPage = location.pathname === '/login' || location.pathname === '/signup';
+function AuthLayout({ children }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[#101c2a] font-sans">
+      {children}
+    </div>
+  );
+}
+
+import { Outlet } from 'react-router-dom';
+
+function ProtectedRoute({ children }) {
+  const { isAuthenticated, loading } = useAuth();
+  
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#101c2a]">
+        <div className="text-white text-xl">Loading...</div>
+      </div>
+    );
+  }
+  
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+  
+  return children;
+}
+
+function MainLayout() {
   return (
     <div className="flex h-screen font-sans">
-      {!isAuthPage && <Sidebar />}
+      <Sidebar />
       <div className="flex-1 overflow-y-auto">
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/scan" element={<Scan />} />
-          <Route path="/vulnerabilities" element={<Vulnerabilities />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/fix-assistant" element={<FixAssistant />} />
-          <Route path="/analytics" element={<Analytics />} />
-          <Route path="/history" element={<History />} />
-          <Route path="/" element={<Login />} />
-        </Routes>
+        <Outlet />
       </div>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <Routes>
+        <Route path="/login" element={<AuthLayout><Login /></AuthLayout>} />
+        <Route path="/signup" element={<AuthLayout><Signup /></AuthLayout>} />
+        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route element={<MainLayout />}>
+          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/scan" element={<ProtectedRoute><Scan /></ProtectedRoute>} />
+          <Route path="/vulnerabilities" element={<ProtectedRoute><Vulnerabilities /></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+          <Route path="/fix-assistant" element={<ProtectedRoute><FixAssistant /></ProtectedRoute>} />
+          <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+          <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
+        </Route>
+      </Routes>
+    </AuthProvider>
   );
 }
 

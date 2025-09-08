@@ -13,6 +13,7 @@ export default function Scan() {
   const [manualPorts, setManualPorts] = useState("80,443,554,8000,8080");
   const [scanProgress, setScanProgress] = useState(0);
   const [activeScan, setActiveScan] = useState(null);
+  const [quickScanIP, setQuickScanIP] = useState("");
   const navigate = useNavigate();
 
   const startAutoScan = async () => {
@@ -38,19 +39,20 @@ export default function Scan() {
         setScanMessage(phases[i].message);
       }
 
-      const response = await axios.post("http://localhost:8000/scan/auto");
+      const response = await axios.post("http://localhost:8001/scan/auto");
       const cameras = response.data.cameras || [];
       
       // Format results for display
       const formattedResults = cameras.map((camera, index) => ({
         id: index + 1,
-        device_name: camera.device_name || `IP Camera ${index + 1}`,
-        ip_address: camera.ip_address || camera.ip,
+        device_name: camera.device_name || `Device ${index + 1}`,
+        ip_address: camera.ip,
         risk_level: camera.risk_level || "Medium",
         status: camera.status || "Active",
         open_ports: camera.open_ports || [],
-        device_type: "IP Camera",
-        last_seen: new Date().toLocaleString()
+        device_type: camera.device_type || "Network Device",
+        last_seen: new Date(camera.last_seen).toLocaleString(),
+        vulnerabilities: camera.vulnerabilities || []
       }));
       
       setScanResults(formattedResults);
@@ -94,9 +96,10 @@ export default function Scan() {
         setScanMessage(phases[i].message);
       }
 
-      const response = await axios.post("http://localhost:8000/scan/", {
+      const response = await axios.post("http://localhost:8001/scan/", {
         ip: manualIP.trim(),
-        ports: ports
+        ports: ports,
+        scan_type: "manual_scan"
       });
       
       const devices = response.data.devices || [];
@@ -104,12 +107,13 @@ export default function Scan() {
       const formattedResults = devices.map((device, index) => ({
         id: index + 1,
         device_name: device.device_name || `Device ${index + 1}`,
-        ip_address: device.ip_address || device.ip,
+        ip_address: device.ip,
         risk_level: device.risk_level || "Medium",
         status: device.status || "Active",
         open_ports: device.open_ports || [],
-        device_type: "Network Device",
-        last_seen: new Date().toLocaleString()
+        device_type: device.device_type || "Network Device",
+        last_seen: new Date(device.last_seen).toLocaleString(),
+        vulnerabilities: device.vulnerabilities || []
       }));
       
       setScanResults(formattedResults);
@@ -124,11 +128,70 @@ export default function Scan() {
     }
   };
 
+  const startQuickScan = async () => {
+    if (!quickScanIP.trim()) {
+      setScanMessage("❌ Please enter an IP address for quick scan");
+      return;
+    }
+
+    setScanning(true);
+    setScanProgress(0);
+    setScanMessage(`🔍 Quick scanning ${quickScanIP}...`);
+    setScanResults([]);
+    setActiveScan("quick");
+
+    try {
+      // Simulate quick scan phases
+      const phases = [
+        { progress: 50, message: `🔍 Scanning ${quickScanIP}...` },
+        { progress: 100, message: "✅ Quick scan completed!" }
+      ];
+
+      for (let i = 0; i < phases.length; i++) {
+        await new Promise(resolve => setTimeout(resolve, 800));
+        setScanProgress(phases[i].progress);
+        setScanMessage(phases[i].message);
+      }
+
+      const response = await axios.get(`http://localhost:8001/scan/quick/${quickScanIP}`);
+      const device = response.data.device;
+      
+      if (device) {
+        const formattedResult = [{
+          id: 1,
+          device_name: device.device_name || `Device`,
+          ip_address: device.ip,
+          risk_level: device.risk_level || "Medium",
+          status: device.status || "Active",
+          open_ports: device.open_ports || [],
+          device_type: device.device_type || "Network Device",
+          last_seen: new Date(device.last_seen).toLocaleString(),
+          vulnerabilities: device.vulnerabilities || []
+        }];
+        
+        setScanResults(formattedResult);
+      } else {
+        setScanMessage("❌ No open ports found on this IP address");
+      }
+      
+      setActiveScan(null);
+    } catch (error) {
+      console.error("Quick scan error:", error);
+      setScanMessage("❌ Quick scan failed. Please check the IP address and try again.");
+      setActiveScan(null);
+    } finally {
+      setScanning(false);
+      setTimeout(() => setScanProgress(0), 2000);
+    }
+  };
+
   const handleStartScan = () => {
     if (scanType === "auto") {
       startAutoScan();
-    } else {
+    } else if (scanType === "manual") {
       startManualScan();
+    } else if (scanType === "quick") {
+      startQuickScan();
     }
   };
 
@@ -222,6 +285,24 @@ export default function Scan() {
                       </div>
                     </div>
                   </label>
+                  
+                  <label className="flex items-center p-3 bg-[#22334d] rounded-lg cursor-pointer hover:bg-[#2a3a5a] transition">
+                    <input
+                      type="radio"
+                      name="scanType"
+                      value="quick"
+                      checked={scanType === "quick"}
+                      onChange={(e) => setScanType(e.target.value)}
+                      className="mr-3 text-teal-400"
+                    />
+                    <div className="flex items-center">
+                      <FaShieldAlt className="mr-2 text-green-400" />
+                      <div>
+                        <div className="font-medium">Quick Scan</div>
+                        <div className="text-xs text-gray-400">Fast port check</div>
+                      </div>
+                    </div>
+                  </label>
                 </div>
               </div>
 
@@ -251,6 +332,23 @@ export default function Scan() {
                 </div>
               )}
 
+              {/* Quick Scan Inputs */}
+              {scanType === "quick" && (
+                <div className="mb-6">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Target IP Address</label>
+                    <input
+                      type="text"
+                      value={quickScanIP}
+                      onChange={(e) => setQuickScanIP(e.target.value)}
+                      placeholder="192.168.1.100"
+                      className="w-full bg-[#22334d] border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-teal-400"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Quick scan checks common ports (22, 23, 80, 443, 554, 8080)</p>
+                  </div>
+                </div>
+              )}
+
               {/* Scan Button */}
               <button
                 onClick={handleStartScan}
@@ -265,7 +363,7 @@ export default function Scan() {
                 ) : (
                   <>
                     <FaSearch className="mr-2" />
-                    Start {scanType === "auto" ? "Auto" : "Manual"} Scan
+                    Start {scanType === "auto" ? "Auto" : scanType === "manual" ? "Manual" : "Quick"} Scan
                   </>
                 )}
               </button>
@@ -442,8 +540,35 @@ export default function Scan() {
                           <div className="flex flex-wrap gap-2">
                             {device.open_ports.map((port, index) => (
                               <span key={index} className="px-2 py-1 bg-red-500 text-white text-xs rounded">
-                                Port {port}
+                                {port.port} ({port.service || 'Unknown'})
                               </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {device.vulnerabilities && device.vulnerabilities.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-gray-600">
+                          <div className="text-sm text-gray-400 mb-2">Vulnerabilities:</div>
+                          <div className="space-y-2">
+                            {device.vulnerabilities.map((vuln, index) => (
+                              <div key={index} className="p-2 bg-red-900/30 rounded border-l-4 border-red-500">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-sm font-medium text-red-300">{vuln.type}</span>
+                                  <span className={`px-2 py-1 text-xs rounded ${
+                                    vuln.severity === 'Critical' ? 'bg-red-600 text-white' :
+                                    vuln.severity === 'High' ? 'bg-orange-500 text-white' :
+                                    vuln.severity === 'Medium' ? 'bg-yellow-500 text-black' :
+                                    'bg-green-500 text-white'
+                                  }`}>
+                                    {vuln.severity}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-gray-300 mt-1">{vuln.description}</p>
+                                {vuln.fix_suggestion && (
+                                  <p className="text-xs text-green-300 mt-1">💡 {vuln.fix_suggestion}</p>
+                                )}
+                              </div>
                             ))}
                           </div>
                         </div>

@@ -34,7 +34,8 @@
 
 import React from "react";
 import { NavLink } from "react-router-dom";
-import { FaShieldAlt, FaSearch, FaBug, FaTools, FaCog, FaHistory, FaChartBar } from "react-icons/fa";
+import { FaShieldAlt, FaSearch, FaBug, FaTools, FaCog, FaHistory, FaChartBar, FaSignOutAlt, FaUser } from "react-icons/fa";
+import { useAuth } from "../contexts/AuthContext";
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard", icon: <FaShieldAlt /> },
@@ -46,6 +47,12 @@ const navItems = [
 ];
 
 export default function Sidebar() {
+  const { user, logout } = useAuth();
+
+  const handleLogout = () => {
+    logout();
+  };
+
   return (
     <aside className="w-60 bg-[#16243a] flex flex-col py-6 px-2 min-h-screen">
       <div className="flex items-center mb-8 px-4">
@@ -70,12 +77,30 @@ export default function Sidebar() {
           </NavLink>
         ))}
       </nav>
-      <div className="mt-auto px-4 pt-8">
-        <div className="flex items-center space-x-3">
+      
+      {/* User Info and Logout */}
+      <div className="mt-auto px-4 pt-8 border-t border-gray-600">
+        <div className="flex items-center space-x-3 mb-4">
           <div className="bg-[#22334d] rounded-full p-2">
-            <FaShieldAlt className="text-teal-400 text-xl" />
+            <FaUser className="text-teal-400 text-xl" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-white truncate">
+              {user?.name || "User"}
+            </p>
+            <p className="text-xs text-gray-400 truncate">
+              {user?.email || ""}
+            </p>
           </div>
         </div>
+        
+        <button
+          onClick={handleLogout}
+          className="w-full flex items-center px-4 py-2 rounded-lg text-gray-300 hover:bg-red-600 hover:text-white transition-colors"
+        >
+          <FaSignOutAlt className="mr-3 text-lg" />
+          Logout
+        </button>
       </div>
     </aside>
   );

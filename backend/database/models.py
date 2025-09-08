@@ -1,6 +1,35 @@
 from sqlalchemy import Column, Integer, String, DateTime, JSON, Text, Boolean
 from datetime import datetime
 from .db import Base
+import hashlib
+import secrets
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    email = Column(String(100), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    is_active = Column(Boolean, default=True)
+    is_verified = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_login = Column(DateTime, nullable=True)
+    profile_data = Column(JSON, nullable=True)  # For storing additional user preferences
+    
+    def set_password(self, password: str):
+        """Hash and set the user's password"""
+        salt = secrets.token_hex(16)
+        pwd_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000)
+        self.hashed_password = f"{salt}:{pwd_hash.hex()}"
+    
+    def check_password(self, password: str) -> bool:
+        """Check if the provided password matches the user's password"""
+        if not self.hashed_password or ':' not in self.hashed_password:
+            return False
+        
+        salt, stored_hash = self.hashed_password.split(':')
+        pwd_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000)
+        return pwd_hash.hex() == stored_hash
 
 class ScanResult(Base):
     __tablename__ = "scan_results"

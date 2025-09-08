@@ -1,101 +1,69 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-import socket
 import json
-import ipaddress
 from datetime import datetime
 from typing import List
-import subprocess
-import platform
+import time
 
-from database import models, schemas, db
+from database.db import get_db
+from database.models import ScanResult, Vulnerability
+from schemas.scan import ScanRequest, ScanResponse, ScanResultOut, ScanStats, DeviceInfo, PortResult
+from services.scanner import scanner
 
 router = APIRouter()
 
-# Dependency to get DB session
-def get_db():
-    db_session = db.SessionLocal()
+@router.post("/", response_model=ScanResponse)
+def perform_scan(request: ScanRequest, db: Session = Depends(get_db)):
+    """Perform network scan with specified parameters"""
     try:
-        yield db_session
-    finally:
-        db_session.close()
-
-def get_local_ip():
-    """Get the local IP address of the machine"""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))
-            return s.getsockname()[0]
-    except:
-        return "192.168.1.1"  # fallback
-
-def get_network_range(local_ip):
-    """Get the network range based on local IP"""
-    try:
-        ip = ipaddress.IPv4Address(local_ip)
-        network = ipaddress.IPv4Network(f"{ip}/24", strict=False)
-        return [str(ip) for ip in network.hosts()]
-    except:
-        # Fallback to common local network ranges
-        return [f"192.168.1.{i}" for i in range(1, 255)]
-
-def scan_single_ip(ip, ports):
-    """Scan a single IP address for open ports"""
-    results = []
-    for port in ports:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(1)
-                result = sock.connect_ex((ip, port))
-                status = "open" if result == 0 else "closed"
-        except Exception as e:
-            status = f"error: {str(e)}"
+        start_time = time.time()
         
-        results.append({"port": port, "status": status})
-    
-    return results
-
-@router.post("/", response_model=schemas.ScanResponse)
-def perform_scan(request: schemas.ScanRequest, db: Session = Depends(get_db)):
-    try:
-        # If specific IP provided, scan only that IP
+        # Determine target IPs
         if request.ip and request.ip != "auto":
-            ips_to_scan = [request.ip]
+            target_ips = [request.ip]
         else:
-            # Auto-detect network and scan all IPs
-            local_ip = get_local_ip()
-            ips_to_scan = get_network_range(local_ip)
+            # Auto-detect network
+            local_ip = scanner.get_local_ip()
+            target_ips = scanner.get_network_range(local_ip)
         
-        all_results = []
+        # Perform scan
+        devices = scanner.scan_network(target_ips, request.ports, request.scan_type)
         
-        for ip in ips_to_scan:
-            try:
-                results = scan_single_ip(ip, request.ports)
-                
-                # Only save if we found open ports or if it's a specific IP scan
-                if any(r["status"] == "open" for r in results) or request.ip != "auto":
-                    scan_record = models.ScanResult(
-                        ip=ip,
-                        ports=json.dumps(request.ports),
-                        result=results,
-                        timestamp=datetime.utcnow(),
-                        scan_type="full_scan" if request.ip == "auto" else "single_scan",
-                        status="completed"
-                    )
-                    db.add(scan_record)
-                    all_results.extend([{"ip": ip, "port": r["port"], "status": r["status"]} for r in results])
-                
-            except Exception as e:
-                print(f"Error scanning {ip}: {e}")
-                continue
+        # Save scan results to database
+        scan_record = ScanResult(
+            ip=request.ip or "auto",
+            ports=json.dumps(request.ports),
+            result=[device for device in devices],
+            timestamp=datetime.utcnow(),
+            scan_type=request.scan_type,
+            status="completed"
+        )
+        db.add(scan_record)
+        
+        # Save vulnerabilities
+        for device in devices:
+            for vuln in device.get('vulnerabilities', []):
+                vulnerability = Vulnerability(
+                    ip=device['ip'],
+                    port=vuln['port'],
+                    vulnerability_type=vuln['type'],
+                    description=vuln['description'],
+                    severity=vuln['severity'],
+                    status="open"
+                )
+                db.add(vulnerability)
         
         db.commit()
         
-        return {
-            "message": f"Scan completed successfully. Scanned {len(ips_to_scan)} IP addresses.",
-            "devices": all_results,
-            "scan_id": len(all_results)
-        }
+        scan_duration = time.time() - start_time
+        
+        return ScanResponse(
+            message=f"Scan completed successfully. Found {len(devices)} devices.",
+            devices=devices,
+            scan_id=scan_record.id,
+            total_devices=len(devices),
+            scan_duration=scan_duration
+        )
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")
@@ -104,71 +72,112 @@ def perform_scan(request: schemas.ScanRequest, db: Session = Depends(get_db)):
 def perform_auto_scan(db: Session = Depends(get_db)):
     """Perform automatic network scan for IP cameras"""
     try:
-        local_ip = get_local_ip()
-        network_ips = get_network_range(local_ip)
+        start_time = time.time()
         
-        # Common ports for IP cameras
-        camera_ports = [80, 443, 554, 21, 22, 23, 8080, 8000, 37777, 37778, 37779]
+        # Get network range
+        local_ip = scanner.get_local_ip()
+        target_ips = scanner.get_network_range(local_ip)
         
-        discovered_cameras = []
+        # Perform camera-specific scan
+        devices = scanner.camera_scan(target_ips)
         
-        for ip in network_ips:
-            try:
-                results = scan_single_ip(ip, camera_ports)
-                open_ports = [r for r in results if r["status"] == "open"]
-                
-                if open_ports:
-                    # This might be an IP camera
-                    scan_record = models.ScanResult(
-                        ip=ip,
-                        ports=json.dumps(camera_ports),
-                        result=results,
-                        timestamp=datetime.utcnow(),
-                        scan_type="auto_scan",
-                        status="completed"
-                    )
-                    db.add(scan_record)
-                    
-                    discovered_cameras.append({
-                        "ip": ip,
-                        "open_ports": open_ports,
-                        "device_type": "IP Camera" if 554 in [p["port"] for p in open_ports] else "Network Device"
-                    })
-                    
-            except Exception as e:
-                continue
+        # Save scan results
+        scan_record = ScanResult(
+            ip="auto",
+            ports=json.dumps(scanner.camera_ports),
+            result=[device for device in devices],
+            timestamp=datetime.utcnow(),
+            scan_type="auto_scan",
+            status="completed"
+        )
+        db.add(scan_record)
+        
+        # Save vulnerabilities
+        for device in devices:
+            for vuln in device.get('vulnerabilities', []):
+                vulnerability = Vulnerability(
+                    ip=device['ip'],
+                    port=vuln['port'],
+                    vulnerability_type=vuln['type'],
+                    description=vuln['description'],
+                    severity=vuln['severity'],
+                    status="open"
+                )
+                db.add(vulnerability)
         
         db.commit()
         
+        scan_duration = time.time() - start_time
+        
         return {
-            "message": f"Auto scan completed. Found {len(discovered_cameras)} potential IP cameras.",
-            "cameras": discovered_cameras
+            "message": f"Auto scan completed. Found {len(devices)} potential IP cameras.",
+            "cameras": devices,
+            "scan_duration": scan_duration
         }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Auto scan failed: {str(e)}")
 
-@router.get("/history", response_model=List[schemas.ScanResultOut])
+@router.get("/history", response_model=List[ScanResultOut])
 def get_scan_history(db: Session = Depends(get_db)):
-    history = db.query(models.ScanResult).order_by(models.ScanResult.timestamp.desc()).all()
+    """Get scan history"""
+    history = db.query(ScanResult).order_by(ScanResult.timestamp.desc()).limit(50).all()
     return history
 
-@router.get("/stats")
+@router.get("/stats", response_model=ScanStats)
 def get_scan_stats(db: Session = Depends(get_db)):
     """Get scanning statistics for dashboard"""
-    total_scans = db.query(models.ScanResult).count()
-    recent_scans = db.query(models.ScanResult).filter(
-        models.ScanResult.timestamp >= datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    ).count()
+    total_scans = db.query(ScanResult).count()
     
-    # Count devices with vulnerabilities
-    vulnerable_devices = db.query(models.ScanResult).filter(
-        models.ScanResult.result.contains([{"status": "open"}])
-    ).count()
+    # Today's scans
+    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_scans = db.query(ScanResult).filter(ScanResult.timestamp >= today).count()
     
-    return {
-        "total_scans": total_scans,
-        "today_scans": recent_scans,
-        "vulnerable_devices": vulnerable_devices,
-        "last_scan": db.query(models.ScanResult).order_by(models.ScanResult.timestamp.desc()).first().timestamp if total_scans > 0 else None
-    }
+    # Vulnerable devices
+    vulnerable_devices = db.query(Vulnerability).filter(Vulnerability.status == "open").count()
+    
+    # Last scan
+    last_scan = db.query(ScanResult).order_by(ScanResult.timestamp.desc()).first()
+    last_scan_time = last_scan.timestamp if last_scan else None
+    
+    # Count devices by risk level
+    high_risk = db.query(ScanResult).filter(ScanResult.result.contains([{"risk_level": "High"}])).count()
+    medium_risk = db.query(ScanResult).filter(ScanResult.result.contains([{"risk_level": "Medium"}])).count()
+    low_risk = db.query(ScanResult).filter(ScanResult.result.contains([{"risk_level": "Low"}])).count()
+    
+    return ScanStats(
+        total_scans=total_scans,
+        today_scans=today_scans,
+        vulnerable_devices=vulnerable_devices,
+        last_scan=last_scan_time,
+        total_devices_found=high_risk + medium_risk + low_risk,
+        high_risk_devices=high_risk,
+        medium_risk_devices=medium_risk,
+        low_risk_devices=low_risk
+    )
+
+@router.get("/quick/{ip}")
+def quick_scan_ip(ip: str, db: Session = Depends(get_db)):
+    """Perform a quick scan on a specific IP"""
+    try:
+        device = scanner.quick_scan(ip)
+        
+        if device:
+            # Save to database
+            scan_record = ScanResult(
+                ip=ip,
+                ports=json.dumps(scanner.quick_scan_ports),
+                result=[device],
+                timestamp=datetime.utcnow(),
+                scan_type="quick_scan",
+                status="completed"
+            )
+            db.add(scan_record)
+            db.commit()
+            
+            return {"message": f"Quick scan completed for {ip}", "device": device}
+        else:
+            return {"message": f"No open ports found on {ip}", "device": None}
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Quick scan failed: {str(e)}")

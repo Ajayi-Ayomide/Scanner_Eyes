@@ -2,7 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import routers
-from routers import scan, suggestions, vulnerabilities, assistant, analytics
+from routers import scan, suggestions, vulnerabilities, assistant, analytics, auth
+from routers import device
+from routers import net
 from database.init_db import init_database
 
 app = FastAPI(title="IoT Security Scanner API")
@@ -20,8 +22,11 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(scan.router, prefix="/scan")
-app.include_router(suggestions.router, prefix="/suggestions")
+app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+app.include_router(device.router, prefix="/device", tags=["Device"])
+app.include_router(scan.router, prefix="/scan", tags=["Scan"])
+app.include_router(net.router, prefix="/net", tags=["Network"])
+app.include_router(suggestions.router, prefix="/suggestions", tags=["Suggestions"])
 app.include_router(vulnerabilities.router, prefix="/vulnerabilities")
 app.include_router(assistant.router, prefix="/assistant")
 app.include_router(analytics.router, prefix="/analytics")
