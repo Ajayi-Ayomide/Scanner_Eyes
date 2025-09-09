@@ -28,7 +28,7 @@ export default function Analytics() {
   const fetchAnalyticsData = async () => {
     try {
       setLoading(true);
-      const response = await axios.get(`http://localhost:8000/analytics/?range=${dateRange}`);
+      const response = await axios.get(`http://localhost:8001/analytics/?range=${dateRange}`);
       setAnalyticsData(response.data);
     } catch (error) {
       console.error("Failed to fetch analytics:", error);
@@ -81,7 +81,7 @@ export default function Analytics() {
 
   const exportReport = async (format) => {
     try {
-      const response = await axios.get(`http://localhost:8000/analytics/export?format=${format}&range=${dateRange}`, {
+      const response = await axios.get(`http://localhost:8001/analytics/export?format=${format}&range=${dateRange}`, {
         responseType: 'blob'
       });
       

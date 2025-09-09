@@ -2,21 +2,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from datetime import datetime, timedelta
-import json
-import csv
 from io import StringIO
 from database.db import get_db
 from database.models import ScanResult, Vulnerability, Suggestion
 from typing import Optional
+from pytz import utc
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 @router.get("/")
-async def get_analytics(range: str = Query("7d", description="Time range: 7d, 30d, 90d, 1y")):
-    """Get comprehensive analytics data"""
+async def get_analytics(
+    range: str = Query("7d", description="Time range: 7d, 30d, 90d, 1y"),
+    db: Session = Depends(get_db)
+):
+    """Get comprehensive analytics data from the database"""
     try:
-        # Calculate date range
-        end_date = datetime.utcnow()
+        end_date = datetime.utcnow().replace(tzinfo=utc)
         if range == "7d":
             start_date = end_date - timedelta(days=7)
         elif range == "30d":
@@ -28,82 +29,71 @@ async def get_analytics(range: str = Query("7d", description="Time range: 7d, 30
         else:
             start_date = end_date - timedelta(days=7)
 
-        # Mock data for development (replace with actual database queries)
+        scans = db.query(ScanResult).filter(ScanResult.timestamp >= start_date, ScanResult.timestamp <= end_date).order_by(ScanResult.timestamp.desc()).all()
+        total_scans = len(scans)
+        scan_history = [
+            {
+                "id": scan.id,
+                "type": scan.scan_type,
+                "status": scan.status,
+                "devices_found": len(scan.result) if scan.result else 0,
+                "vulnerabilities_found": 0,
+                "timestamp": scan.timestamp.astimezone(utc).isoformat() if scan.timestamp else None
+            }
+            for scan in scans
+        ]
+        vulns = db.query(Vulnerability).filter(Vulnerability.detected_at >= start_date, Vulnerability.detected_at <= end_date).all()
+        total_vulns = len(vulns)
+        critical_vulns = sum(1 for v in vulns if v.severity == "Critical")
+        high_vulns = sum(1 for v in vulns if v.severity == "High")
+        medium_vulns = sum(1 for v in vulns if v.severity == "Medium")
+        low_vulns = sum(1 for v in vulns if v.severity == "Low")
+        fixed_vulns = sum(1 for v in vulns if v.status == "fixed")
+        recent_activity = [
+            {
+                "id": scan.id,
+                "type": "scan",
+                "description": f"{scan.scan_type.capitalize()} scan completed",
+                "timestamp": scan.timestamp.astimezone(utc).isoformat() if scan.timestamp else None,
+                "severity": "info"
+            }
+            for scan in scans[:5]
+        ]
+        device_types = []
+        trends = {}
+        for v in vulns:
+            day = v.detected_at.astimezone(utc).date().isoformat() if v.detected_at else None
+            if not day:
+                continue
+            if day not in trends:
+                trends[day] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+            if v.severity == "Critical":
+                trends[day]["critical"] += 1
+            elif v.severity == "High":
+                trends[day]["high"] += 1
+            elif v.severity == "Medium":
+                trends[day]["medium"] += 1
+            elif v.severity == "Low":
+                trends[day]["low"] += 1
+        vulnerability_trends = [
+            {"date": day, **counts} for day, counts in sorted(trends.items())
+        ]
+        max_score = max(1, total_vulns + fixed_vulns)
+        score = max(0, 100 - ((critical_vulns * 10 + high_vulns * 7 + medium_vulns * 4 + low_vulns * 1) / (max_score * 10) * 100))
         analytics_data = {
-            "totalScans": 24,
-            "totalVulnerabilities": 15,
-            "criticalVulnerabilities": 3,
-            "highVulnerabilities": 5,
-            "mediumVulnerabilities": 4,
-            "lowVulnerabilities": 3,
-            "fixedVulnerabilities": 8,
-            "securityScore": 72,
-            "recentActivity": [
-                {
-                    "id": 1,
-                    "type": "scan",
-                    "description": "Auto scan completed",
-                    "timestamp": "2024-01-15T10:30:00Z",
-                    "severity": "info"
-                },
-                {
-                    "id": 2,
-                    "type": "vulnerability",
-                    "description": "Critical vulnerability found",
-                    "timestamp": "2024-01-15T10:25:00Z",
-                    "severity": "critical"
-                },
-                {
-                    "id": 3,
-                    "type": "fix",
-                    "description": "Vulnerability marked as fixed",
-                    "timestamp": "2024-01-15T10:20:00Z",
-                    "severity": "success"
-                }
-            ],
-            "vulnerabilityTrends": [
-                {"date": "2024-01-09", "critical": 2, "high": 3, "medium": 2, "low": 1},
-                {"date": "2024-01-10", "critical": 3, "high": 4, "medium": 3, "low": 2},
-                {"date": "2024-01-11", "critical": 3, "high": 5, "medium": 4, "low": 2},
-                {"date": "2024-01-12", "critical": 2, "high": 4, "medium": 3, "low": 2},
-                {"date": "2024-01-13", "critical": 3, "high": 5, "medium": 4, "low": 3},
-                {"date": "2024-01-14", "critical": 3, "high": 5, "medium": 4, "low": 3},
-                {"date": "2024-01-15", "critical": 3, "high": 5, "medium": 4, "low": 3}
-            ],
-            "deviceTypes": [
-                {"type": "IP Camera", "count": 8, "vulnerabilities": 6},
-                {"type": "Router", "count": 2, "vulnerabilities": 3},
-                {"type": "Server", "count": 1, "vulnerabilities": 2},
-                {"type": "Desktop", "count": 3, "vulnerabilities": 4}
-            ],
-            "scanHistory": [
-                {
-                    "id": 1,
-                    "type": "auto",
-                    "status": "completed",
-                    "devices_found": 12,
-                    "vulnerabilities_found": 8,
-                    "timestamp": "2024-01-15T10:30:00Z"
-                },
-                {
-                    "id": 2,
-                    "type": "manual",
-                    "status": "completed",
-                    "devices_found": 1,
-                    "vulnerabilities_found": 2,
-                    "timestamp": "2024-01-15T09:15:00Z"
-                },
-                {
-                    "id": 3,
-                    "type": "auto",
-                    "status": "completed",
-                    "devices_found": 10,
-                    "vulnerabilities_found": 6,
-                    "timestamp": "2024-01-14T15:45:00Z"
-                }
-            ]
+            "totalScans": total_scans,
+            "totalVulnerabilities": total_vulns,
+            "criticalVulnerabilities": critical_vulns,
+            "highVulnerabilities": high_vulns,
+            "mediumVulnerabilities": medium_vulns,
+            "lowVulnerabilities": low_vulns,
+            "fixedVulnerabilities": fixed_vulns,
+            "securityScore": int(score),
+            "recentActivity": recent_activity,
+            "vulnerabilityTrends": vulnerability_trends,
+            "deviceTypes": device_types,
+            "scanHistory": scan_history
         }
-
         return analytics_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analytics error: {str(e)}")

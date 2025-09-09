@@ -30,11 +30,12 @@ def perform_scan(request: ScanRequest, db: Session = Depends(get_db)):
         devices = scanner.scan_network(target_ips, request.ports, request.scan_type)
         
         # Save scan results to database
+        from datetime import timezone
         scan_record = ScanResult(
             ip=request.ip or "auto",
             ports=json.dumps(request.ports),
             result=[device for device in devices],
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             scan_type=request.scan_type,
             status="completed"
         )
@@ -82,11 +83,12 @@ def perform_auto_scan(db: Session = Depends(get_db)):
         devices = scanner.camera_scan(target_ips)
         
         # Save scan results
+        from datetime import timezone
         scan_record = ScanResult(
             ip="auto",
             ports=json.dumps(scanner.camera_ports),
             result=[device for device in devices],
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             scan_type="auto_scan",
             status="completed"
         )
@@ -164,11 +166,12 @@ def quick_scan_ip(ip: str, db: Session = Depends(get_db)):
         
         if device:
             # Save to database
+            from datetime import timezone
             scan_record = ScanResult(
                 ip=ip,
                 ports=json.dumps(scanner.quick_scan_ports),
                 result=[device],
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 scan_type="quick_scan",
                 status="completed"
             )
